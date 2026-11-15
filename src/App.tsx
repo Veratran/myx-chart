@@ -83,7 +83,6 @@ export function App() {
   const [section, setSection] = useState<"alerts" | "pine">("alerts");
   const [visibility, setVisibility] = useState<IndicatorVisibility>({
     volume: true,
-    ma: true,
     wavetrend: true,
     rsi: true,
     divergence: true,
@@ -111,18 +110,6 @@ export function App() {
   const candles: Candle[] = useMemo(
     () => candlesQuery.data?.candles ?? [],
     [candlesQuery.data],
-  );
-
-  // 4h candles feed the multi-timeframe EMA 30 on the price pane,
-  // whatever timeframe is on display (shares the cache when TF = 4h).
-  const candles4hQuery = useQuery({
-    queryKey: ["candles", symbol, "4h"],
-    queryFn: () => api.get_candles({ symbol, timeframe: "4h" }),
-    refetchInterval: 60_000,
-  });
-  const candles4h: Candle[] = useMemo(
-    () => candles4hQuery.data?.candles ?? [],
-    [candles4hQuery.data],
   );
 
   const wsStatus = useBitgetRealtime(queryClient, symbol, timeframe);
@@ -445,7 +432,6 @@ export function App() {
           {(
             [
               { key: "volume", label: "Volume" },
-              { key: "ma", label: "MA" },
               { key: "wavetrend", label: "WaveTrend" },
               { key: "rsi", label: "RSI" },
               { key: "divergence", label: "Phân kỳ RSI" },
@@ -550,7 +536,6 @@ export function App() {
           ) : (
             <ChartBlock
               candles={candles}
-              candles4h={candles4h}
               symbol={symbol}
               alertLines={alertLines}
               onPickPrice={onPickPrice}
@@ -558,15 +543,15 @@ export function App() {
             />
           )}
           <p className="mt-1.5 text-xs text-[var(--dim)]">
-            Một khối chart duy nhất: nến giá + 5 đường MA (EMA 200 vàng ·
-            SMA 50 đỏ · EMA 30 hồng tím — đường này lấy từ khung 4h, vẽ bậc
-            thang theo nến 4h đã đóng · EMA 9 xanh lá · EMA 5 trắng) ·
+            Một khối chart duy nhất: nến giá ·
             WaveTrend (10/21, dải ±53/±60, chấm cắt xanh/đỏ) · RSI 14 + nhãn
-            phân kỳ. Lớp MMIS Suite (bật mặc định): nến tô màu theo động
+            phân kỳ. Lớp MMIS (bật mặc định): nến tô màu theo động
             thái MM — đỉnh cao trào hồng fuchsia · bẫy đỉnh đỏ maroon · quét
-            đáy / kê tường gom vàng · đẩy giá aqua — EMA 20 xanh dương +
-            EMA 50 cam, nhãn VÀO HÀNG / MM MUA / BÁN ĐỈNH / BẪY ĐỈNH /
+            đáy / kê tường gom vàng · đẩy giá aqua —
+            nhãn VÀO HÀNG / MM MUA / BÁN ĐỈNH / BẪY ĐỈNH /
             STOP LOSS / Bull / Bear và bảng động thái MM phía trên chart.
+            Các đường EMA/MA đã bỏ khỏi chart cho đỡ rối (EMA vẫn được
+            dùng bên trong công thức MMIS).
             Bật/tắt từng chỉ báo bằng hàng nút "Chỉ báo" phía trên; chạm
             vào chart để lấy giá đặt cảnh báo.
           </p>

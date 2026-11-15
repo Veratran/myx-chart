@@ -24,12 +24,9 @@ type SeriesMarker,
 type Time,
 } from "lightweight-charts";
 import {
-MA_CONFIG,
 computeMmis,
 findCrosses,
 findDivergences,
-movingAverages,
-mtfEmaSeries,
 rsiSeries,
 wavetrend,
 type Candle,
@@ -44,7 +41,6 @@ export type PriceAlertLine = {
 /** Which of the indicator layers are drawn on the chart. */
 export type IndicatorVisibility = {
   volume: boolean;
-  ma: boolean;
   wavetrend: boolean;
   rsi: boolean;
   divergence: boolean;
@@ -53,8 +49,6 @@ export type IndicatorVisibility = {
 
 type Props = {
   candles: Candle[];
-  /** 4h candles of the same symbol — source for the multi-timeframe EMA 30. */
-  candles4h: Candle[];
   symbol: string;
   alertLines: PriceAlertLine[];
   onPickPrice: (price: number) => void;
@@ -71,9 +65,6 @@ const AMBER = "#f0b90b";
 type SeriesRefs = {
   price?: ISeriesApi<"Candlestick">;
   volume?: ISeriesApi<"Histogram">;
-  mas?: ISeriesApi<"Line">[];
-  mmisEma20?: ISeriesApi<"Line">;
-  mmisEma50?: ISeriesApi<"Line">;
   wt1?: ISeriesApi<"Line">;
   wt2?: ISeriesApi<"Line">;
   wtDiff?: ISeriesApi<"Histogram">;
@@ -89,7 +80,6 @@ type PaneBuilders = {
 
 export function ChartBlock({
   candles,
-  candles4h,
   symbol,
   alertLines,
   onPickPrice,
@@ -112,21 +102,9 @@ export function ChartBlock({
     const rsi = rsiSeries(candles.map((c) => c.close));
     const crosses = findCrosses(wt1, wt2);
     const divs = findDivergences(candles, rsi);
-    // MA lines: same-timeframe from the display closes, except the
-    // multi-timeframe entry (EMA 30), whose values come from closed
-    // 4h candles, step-projected onto the display bars.
-    const mas = movingAverages(candles.map((c) => c.close)).map((ma, i) => {
-      const cfg = MA_CONFIG[i];
-      if (!cfg?.mtf) return ma;
-      return {
-        ...ma,
-        label: `${ma.label} · 4h`,
-        values: mtfEmaSeries(candles, candles4h, cfg.len, 4 * 3600),
-      };
-    });
     const mmis = computeMmis(candles);
-    return { wt1, wt2, rsi, crosses, divs, mas, mmis };
-  }, [candles, candles4h]);
+    return { wt1, wt2, rsi, crosses, divs, mmis };
+  }, [candles]);
 
   // Create the chart once, plus builders that add/remove the WaveTrend
   // and RSI panes on demand (their pane collapses when the last series
@@ -177,47 +155,10 @@ export function ChartBlock({
     chart.priceScale("", 0).applyOptions({
       scaleMargins: { top: 0.82, bottom: 0 },
     });
-    // The 5 "10 in 1 MAs" lines overlay the price pane; their config
-    // (type/length/color) comes from MA_CONFIG in indicators.ts.
-    const mas = MA_CONFIG.map((cfg) =>
-      chart.addSeries(
-        LineSeries,
-        {
-          color: cfg.color,
-          lineWidth: 1,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          title: cfg.mtf ? `${cfg.type} ${cfg.len} · 4h` : `${cfg.type} ${cfg.len}`,
-        },
-        0,
-      ),
-    );
-    // MMIS trend lines (EMA 20 / EMA 50 in the Pine's own colors) live on
-    // the price pane too; they are created once and shown/hidden with the
-    // MMIS toggle, like the MA lines.
-    const mmisEma20 = chart.addSeries(
-      LineSeries,
-      {
-        color: "#2962FF",
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        title: "EMA 20 · MMIS",
-      },
-      0,
-    );
-    const mmisEma50 = chart.addSeries(
-      LineSeries,
-      {
-        color: "#FF6D00",
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        title: "EMA 50 · MMIS",
-      },
-      0,
-    );
-    seriesRef.current = { price, volume, mas, mmisEma20, mmisEma50 };
+    // No MA/EMA lines are drawn (user removed them 2026-11-15 for a
+    // clean chart); EMA20/EMA50 still exist inside computeMmis as math
+    // for tactics/FSM, they are just not rendered as series.
+    seriesRef.current = { price, volume };
 
     const addWt = () => {
       const pane = chart.addPane();
@@ -351,9 +292,6 @@ export function ChartBlock({
     if (visibility.rsi && !s.rsi) b.addRsi();
     if (!visibility.rsi && s.rsi) b.removeRsi();
     s.volume?.applyOptions({ visible: visibility.volume });
-    for (const m of s.mas ?? []) m.applyOptions({ visible: visibility.ma });
-    s.mmisEma20?.applyOptions({ visible: visibility.mmis });
-    s.mmisEma50?.applyOptions({ visible: visibility.mmis });
     const panes = chart.panes();
     panes[0]?.setHeight(320);
     let idx = 1;
@@ -395,12 +333,6 @@ export function ChartBlock({
     );
     const line = (arr: (number | null)[]) =>
       arr.flatMap((v, i) => (v == null ? [] : [{ time: t(i), value: v }]));
-    (s.mas ?? []).forEach((series, i) => {
-      const ma = computed.mas[i];
-      if (ma) series.setData(line(ma.values));
-    });
-    s.mmisEma20?.setData(line(computed.mmis.ema20));
-    s.mmisEma50?.setData(line(computed.mmis.ema50));
     s.wt1?.setData(line(computed.wt1));
     s.wt2?.setData(line(computed.wt2));
     s.wtDiff?.setData(

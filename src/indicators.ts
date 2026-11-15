@@ -474,12 +474,14 @@ export function computeMmis(candles: Candle[]): MmisResult {
   const { wt1, wt2 } = wavetrendMmis(candles);
   const goldCross: boolean[] = new Array(n).fill(false);
   const deathCross: boolean[] = new Array(n).fill(false);
+  const wtCrossUp: boolean[] = new Array(n).fill(false);
   for (let i = 1; i < n; i++) {
     const a0 = wt1[i - 1];
     const b0 = wt2[i - 1];
     const a1 = wt1[i];
     const b1 = wt2[i];
     if (a0 == null || b0 == null || a1 == null || b1 == null) continue;
+    if (a0 <= b0 && a1 > b1) wtCrossUp[i] = true;
     if (a0 <= b0 && a1 > b1 && a1 <= -30) goldCross[i] = true;
     if (a0 >= b0 && a1 < b1 && a1 >= 40) deathCross[i] = true;
   }
@@ -565,6 +567,7 @@ export function computeMmis(candles: Candle[]): MmisResult {
     utad: new Array(n).fill(false),
     dump: new Array(n).fill(false),
   };
+  const highestPrev15Arr: (number | null)[] = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
     const c = candles[i];
     if (!c) continue;
@@ -586,6 +589,7 @@ export function computeMmis(candles: Candle[]): MmisResult {
       }
       highestPrev15 = m;
     }
+    highestPrev15Arr[i] = highestPrev15;
     const new15High = highestPrev15 != null && c.high >= highestPrev15;
     const volDrying = i > 0 && c.volume < (candles[i - 1]?.volume ?? 0) * 0.95;
 
@@ -676,14 +680,57 @@ export function computeMmis(candles: Candle[]): MmisResult {
     const e20 = ema20[i];
     const e50 = ema50[i];
     const w = wt1[i];
-    const uptrendLaunch =
+    const r = rsi[i];
+    const a = atr[i];
+    const vr = volRatio[i];
+    const range = ranges[i] ?? 0;
+    const uwr = upperWickRatio[i] ?? 0;
+    const h15 = highestPrev15Arr[i];
+    // Entry logic from the 2026-11-15 Pine (MMIS Engine v2, Drive):
+    // an anti-FOMO guard AND one of three entry scenarios — WT base
+    // launch cross, Wyckoff LPS pullback retest, or volume breakout.
+    // Replaces the Suite's single launch condition.
+    const antiFomo =
+      w != null &&
+      w <= 22 &&
+      r != null &&
+      r <= 66 &&
+      uwr <= 0.25 &&
+      a != null &&
+      range <= 2.2 * a &&
+      !tactics.dump[i];
+    const entryBase =
+      wtCrossUp[i] &&
+      w != null &&
+      w <= -5 &&
+      c.close > c.open &&
+      e20 != null &&
+      c.close >= e20;
+    const entryPullback =
       e20 != null &&
       e50 != null &&
-      c.close >= e20 &&
       e20 >= e50 &&
+      c.low <= e20 * 1.008 &&
+      c.close >= e20 &&
+      c.close > c.open &&
       w != null &&
-      w > -10 &&
-      !tactics.dump[i];
+      w <= 15 &&
+      w >= -30 &&
+      h15 != null &&
+      c.close <= h15 * 0.985;
+    const entryBreakout =
+      h15 != null &&
+      c.close > h15 &&
+      vr != null &&
+      vr >= 2 &&
+      w != null &&
+      w <= 20 &&
+      r != null &&
+      r <= 68 &&
+      c.close > c.open &&
+      uwr < 0.2;
+    const uptrendLaunch =
+      (entryBase || entryPullback || entryBreakout) && antiFomo;
     const slBreach =
       e50 != null &&
       e20 != null &&
@@ -714,8 +761,39 @@ export function computeMmis(candles: Candle[]): MmisResult {
     cooldownState[i] = cooldown;
   }
 
-  // UTAD bars that did NOT trigger the FSM apex-sell still get the
-  // trap marker (Pine: is_tactic_utad and not trigger_apex_sell).
+  // --- "BÁN ĐỈNH" standalone apex-sell signal (2026-11-15 Pine): the
+  // sell plot is the FSM exit OR the first bar of an apex/death-cross
+  // raw run, even when the FSM holds no position.
+  const apexSignalAt: boolean[] = new Array(n).fill(false);
+  {
+    let prevRaw = false;
+    for (let i = 0; i < n; i++) {
+      const c = candles[i];
+      if (!c) {
+        prevRaw = false;
+        continue;
+      }
+      const w = wt1[i];
+      const raw =
+        tactics.apex[i] ||
+        (deathCross[i] &&
+          w != null &&
+          w >= 38 &&
+          (upperWickRatio[i] ?? 0) >= 0.18 &&
+          c.close < c.open);
+      apexSignalAt[i] = raw && !prevRaw;
+      prevRaw = raw;
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    if (apexSignalAt[i] && !apexSellAt[i]) {
+      apexSellAt[i] = true;
+      events.push({ index: i, kind: "apex_sell" });
+    }
+  }
+
+  // UTAD bars that did NOT trigger a sell plot still get the trap
+  // marker (Pine: is_tactic_utad and not signal_sell_plot).
   for (let i = 0; i < n; i++) {
     if (tactics.utad[i] && !apexSellAt[i]) {
       events.push({ index: i, kind: "utad_trap" });
@@ -724,21 +802,26 @@ export function computeMmis(candles: Candle[]): MmisResult {
 
   // --- "MM MUA" bottom-buy signal: fires only on the FIRST bar of a
   // raw run, and never on the same bar as a hold entry (VÀO HÀNG wins).
+  // The 2026-11-15 Pine adds a deep-discount lock on the raw run:
+  // WT1 <= 0 AND close at least 1.5% below the prior 15-bar high.
+  const rawBuyAt: boolean[] = new Array(n).fill(false);
   for (let i = 0; i < n; i++) {
-    const rawBuy =
+    const c = candles[i];
+    if (!c) continue;
+    const w = wt1[i];
+    const h15 = highestPrev15Arr[i];
+    const bottomDiscount =
+      w != null && w <= 0 && h15 != null && c.close <= h15 * 0.985;
+    rawBuyAt[i] =
       (tactics.sweep[i] ||
         (goldCross[i] && (lowerWickRatio[i] ?? 0) >= 0.25) ||
         tactics.absorption[i] ||
         bullDivAt[i]) &&
-      !tactics.dump[i];
-    const prevRaw =
-      i > 0 &&
-      (tactics.sweep[i - 1] ||
-        (goldCross[i - 1] && (lowerWickRatio[i - 1] ?? 0) >= 0.25) ||
-        tactics.absorption[i - 1] ||
-        bullDivAt[i - 1]) &&
-      !tactics.dump[i - 1];
-    if (rawBuy && !prevRaw && !holdStartAt[i]) {
+      !tactics.dump[i] &&
+      bottomDiscount;
+  }
+  for (let i = 0; i < n; i++) {
+    if (rawBuyAt[i] && !(i > 0 && rawBuyAt[i - 1]) && !holdStartAt[i]) {
       events.push({ index: i, kind: "mm_buy" });
     }
   }

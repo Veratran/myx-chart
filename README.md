@@ -14,9 +14,13 @@ toàn trong trình duyệt.
   nhịp dự phòng 60 giây. Tự nối lại khi đứt.
 - **Chỉ báo:** giữ nguyên công thức của bản Space — WaveTrend Woodfield/
   LazyBear 10/21 (dải ±53/±60, chấm cắt), RSI 14 + phân kỳ pivot 5/5,
-  5 đường MA (EMA 30 lấy từ nến 4h đã đóng), MMIS Suite (động thái MM,
-  HUD Bull/Bear, MVRV, nhãn VÀO HÀNG / MM MUA / BÁN ĐỈNH…), kèm 2 khối
-  Pine để copy sang TradingView.
+  MMIS (động thái MM, HUD Bull/Bear, MVRV, nhãn VÀO HÀNG / MM MUA /
+  BÁN ĐỈNH…), kèm 2 khối Pine để copy sang TradingView. Các đường
+  EMA/MA **không vẽ** lên chart cho đỡ rối (vẫn dùng trong công thức
+  MMIS). Pine MMIS là bản trong gói nghiên cứu sếp gửi 2026-11-15
+  (`docs/MMIS_HolyGrail_MM_Engine.pine`, 369 dòng): cổng vào hàng
+  anti-FOMO + 3 kịch bản vào, MM MUA có khóa chiết khấu sâu, BÁN ĐỈNH
+  có thêm tín hiệu apex/death-cross độc lập.
 
 ## Khác bản Space ở đâu
 
